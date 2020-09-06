@@ -1,0 +1,177 @@
+---
+title: "Predective Analysis to Classify the Execution of Weight Lifting Exercise"
+author: "Aman Bhagat"
+date: "6/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Data Defination 
+
+```{r data}
+pml.testing <- read.csv("pml-testing.csv")
+pml.training <- read.csv("pml-training.csv") 
+```
+
+Lets look at the dimensions of our training data.
+
+```{r summary}
+dim(pml.training)
+```
+
+As we can see there are 19622 observations of 160 variables are present, we can fairly say that's its not possible to show the summary of the dataset in this report. As we have abundant data to train the model so we would create a partition from data set for the cross validation.
+
+```{r crossvalidation, cache = TRUE}
+library(caret)
+inTrain <- createDataPartition(y = pml.training$classe , p = 0.70, list = FALSE )
+pml.train <- pml.training[inTrain,]
+pml.crossValidate <- pml.training[-inTrain,]
+dim(pml.train)
+dim(pml.crossValidate)
+```
+
+Now we have divided our data set into 7:3 ratio for the cross validation.
+
+## Data Preprocessing
+
+Now we will preprocess the data before we train the data to the model. From the data summary we have obsereved that there are lots of variable present and many of them shows very less varaiblity, so it would be benefitial for us to remove those variables from our data set.
+
+```{r nzv, cache = TRUE}
+library(caret)
+nzv <- nearZeroVar(pml.train, saveMetrics = TRUE)
+pml.train <- pml.train[,nzv$nzv == FALSE]
+pml.testing <- pml.testing[,nzv$nzv == FALSE]
+pml.crossValidate <- pml.crossValidate[, nzv$nzv == FALSE]
+```
+
+Now we have removed the variables which have variablity near zero. Now we check for the NA's in our variable which can temper our results.
+
+```{r NA}
+columnsum <- colSums(is.na(pml.train))
+columnsum[columnsum>1000]
+```
+
+Here we can see that there are alot of variables which has more than 1000 NAs and almost 97% of the values in the variable are NA's. Therefore it would be a good idea to remove those variables from out dataset.
+
+```{r WithoutNA}
+train.withoutNa <- pml.train[ , colSums(is.na(pml.train))/13737 <= 0.90]
+sum(is.na(train.withoutNa))
+testing.withoutNA <- pml.testing[,colSums(is.na(pml.train))/13737 <= 0.90]
+crossvalidate.withoutNA <- pml.crossValidate[,colSums(is.na(pml.train))/13737 <= 0.90]
+```
+
+Now, we have removed those predictors from the dataset that has NAs over 90 percent. We did the same for the testing data and crossvalidate data.
+
+```{r dimension}
+dim(train.withoutNa)
+```
+
+We can see that the number of variables has been reduced to 59.
+
+```{r removeIdentification}
+#Removing Identification only variables
+train.withoutNa <- train.withoutNa[,-(1:5)]
+testing.withoutNA <- testing.withoutNA[,-(1:5)]
+crossvalidate.withoutNA <- crossvalidate.withoutNA[,-(1:5)]
+
+```
+
+## Correlation Analysis
+
+```{r correlation,fig.width=14, fig.height=10}
+library(corrplot)
+corr <- cor(train.withoutNa[,-54])
+corrplot(corr, order = "FPC", method = "color", type = "lower",tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+
+```
+
+From the above Analysis we can infer that the variables which are highly correlated are shaded as dark color and which is very low in numbers. Therefore we can say that there are relatively less number of correlated variables in our dataset. Therefore we would not do Principal component Analysis in this assignment.
+
+```{r pca, cache = TRUE, echo=FALSE}
+##PreProcessModel <- preProcess(train.withoutNa,method = "pca", thresh = 0.9)
+##trainPC <- predict(PreProcessModel, train.withoutNa)
+##testPC <- predict(PreProcessModel, testing.withoutNA)
+##CrossValidatePC <- predict(PreProcessModel, crossvalidate.withoutNA)
+##PreProcessModel
+```
+
+
+## Model Selection
+
+We will now try to choose best model for the current training data.
+
+### Model1: Random Forest
+Initially we will train our model using Random Forest.
+
+```{r modelSelection, cache = TRUE}
+fit.rf <- train(classe ~ ., method  = "rf" , data = train.withoutNa)
+predict.rf <- predict(fit.rf, crossvalidate.withoutNA)
+c1 <- confusionMatrix(predict.rf, crossvalidate.withoutNA$classe)
+c1$overall["Accuracy"]
+```
+
+```{r plotA}
+plot(c1$table, col = c1$byClass, main = paste("Random Forest - Accuracy =",
+                  round(c1$overall['Accuracy'], 4)))
+```
+
+Now we trained our model using random forest and we cross validate the data that we kept for crossvalidation. From the coross validation, the accuracy that we are getting by training our model with Randforest is arround 99 percentage which is highly accurate but the time taken by the model to train is high.
+
+### Model2: Stochastic Gradient Boosting 
+
+```{r GBM, cache = TRUE}
+fit.gbm <- train(classe ~ ., method  = "gbm" , data = train.withoutNa, verbose = FALSE)
+predict.gbm <- predict(fit.gbm, crossvalidate.withoutNA)
+c2 <- confusionMatrix(predict.gbm, crossvalidate.withoutNA$classe)
+c2$overall["Accuracy"]
+```
+
+```{r plotB}
+plot(c2$table, col = c2$byClass, main = paste("GBM - Accuracy =",
+                  round(c2$overall['Accuracy'], 4)))
+```
+
+Now, we have applied GBM model to train our data and cross validated the data using cross validation data set. We observed that it is also taking a lot of time to train the dataset. And the accuracy is comparitively less than the random forest model. Therefore we will reject this model and proceed further.
+
+### Model3: Support Vector Machine
+
+```{r SVM, cache = TRUE}
+library(e1071)
+fit.svm <- svm(classe ~ ., method  = "svm" , data = train.withoutNa, verbose = FALSE)
+predict.svm <- predict(fit.svm, crossvalidate.withoutNA)
+c3 <- confusionMatrix(predict.svm, crossvalidate.withoutNA$classe)
+c3$overall["Accuracy"]
+```
+
+```{r plotC}
+plot(c2$table, col = c2$byClass, main = paste("SVM - Accuracy =",
+                  round(c3$overall['Accuracy'], 4)))
+```
+
+Now we have trained our data using SVM model and cross validated to get the accuracy. We observed that using SVM model which uses radial kernel takes relatively less time than the other two models but out of sample error is higher than the other two models. 
+
+## Results
+
+```{r Accuracy}
+data.frame(RandomForest =  c1$overall["Accuracy"],
+GBM = c2$overall["Accuracy"],SVM = c3$overall["Accuracy"])
+```
+
+From the above results we can infer that Random Forest and GBM models takes time to train the data set whereas the SVM model takes much lesser time to train the data set. But the Accuracy of other two is comparatively high. Therefore there is a time and accuracy tradeoff. Here we will choose Random Forest model to classify from the given test dataset because the time taken to train the data is not that high on which we can reject this model.
+
+
+```{r test}
+predict.svm.test <- predict(fit.rf, testing.withoutNA)
+predict.svm.test
+```
+
+Above are the results for the test data by applying Random Forest Model.
